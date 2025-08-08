@@ -2,6 +2,7 @@
 using CusomMapOSM_Application.Interfaces.Services.Cache;
 using CusomMapOSM_Application.Interfaces.Services.Jwt;
 using CusomMapOSM_Application.Interfaces.Services.Mail;
+using CusomMapOSM_Application.Interfaces.Services.Overpass;
 using CusomMapOSM_Infrastructure.Databases;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Implementations.Authentication;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Implementations.Type;
@@ -55,6 +56,7 @@ public static class DependencyInjections
         services.AddScoped<IJwtService, JwtService>();
         services.AddScoped<IMailService, MailService>();
         services.AddScoped<IRedisCacheService, RedisCacheService>();
+        services.AddHttpClient<IOverpassService, OverpassService>();
 
         services.AddScoped<IAuthenticationService, AuthenticationService>();
 
