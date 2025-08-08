@@ -31,6 +31,7 @@ builder.Services.AddInfrastructureServices(builder.Configuration);
 builder.Services.AddApplicationServices();
 builder.Services.AddEndpoints();
 builder.Services.AddValidation();
+builder.Services.AddHttpClient();
 
 // Add swagger services to the container.
 builder.Services.AddSwaggerServices();
@@ -52,7 +53,7 @@ app.UseAuthentication();
 app.MapHealthChecks("/health");
 app.MapHealthChecks("/ready");
 
-// Map all endpoints
+// Map all endpoints including OSM queries
 app.MapEndpoints();
 
 app.Run();
