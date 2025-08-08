@@ -3,6 +3,7 @@ using CusomMapOSM_Application.Interfaces.Services.Cache;
 using CusomMapOSM_Application.Interfaces.Services.Jwt;
 using CusomMapOSM_Application.Interfaces.Features.Osm;
 using CusomMapOSM_Application.Interfaces.Services.Mail;
+using CusomMapOSM_Application.Interfaces.Services.Osm;
 using CusomMapOSM_Infrastructure.Databases;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Implementations.Authentication;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Implementations.Type;
