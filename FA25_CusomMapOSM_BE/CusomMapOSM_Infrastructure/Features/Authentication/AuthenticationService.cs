@@ -48,11 +48,11 @@ public class AuthenticationService : IAuthenticationService
         return Option.Some<LoginResDto, Error>(new LoginResDto { Token = token });
     }
 
-    public async Task<Option<RegisterResDto, Error>> LogOut(Guid userId)
+    public async Task<Option<LogoutResDto, Error>> LogOut(Guid userId)
     {
         var user = await _authenticationRepository.GetUserById(userId);
         if (user is null)
-            return Option.None<RegisterResDto, Error>(new Error("Authentication.UserNotFound", "User not found", ErrorType.NotFound));
+            return Option.None<LogoutResDto, Error>(new Error("Authentication.UserNotFound", "User not found", ErrorType.NotFound));
 
         var accountStatus = await _typeRepository.GetAccountStatusById(AccountStatusEnum.Inactive);
 
@@ -62,7 +62,7 @@ public class AuthenticationService : IAuthenticationService
 
         await _redisCacheService.ForceLogout(userId);
 
-        return Option.Some<RegisterResDto, Error>(new RegisterResDto { Result = "Logout successfully" });
+        return Option.Some<LogoutResDto, Error>(new LogoutResDto { Result = "Logout successfully" });
     }
 
     public async Task<Option<RegisterResDto, Error>> VerifyEmail(RegisterVerifyReqDto req)
