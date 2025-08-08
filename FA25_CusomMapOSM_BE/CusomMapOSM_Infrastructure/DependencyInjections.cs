@@ -1,8 +1,10 @@
 ﻿using CusomMapOSM_Application.Interfaces.Features.Authentication;
 using CusomMapOSM_Application.Interfaces.Services.Cache;
 using CusomMapOSM_Application.Interfaces.Services.Jwt;
+using CusomMapOSM_Application.Interfaces.Features.Osm;
 using CusomMapOSM_Application.Interfaces.Services.Mail;
 using CusomMapOSM_Application.Interfaces.Services.Overpass;
+using CusomMapOSM_Application.Interfaces.Services.Osm;
 using CusomMapOSM_Infrastructure.Databases;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Implementations.Authentication;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Implementations.Type;
@@ -10,6 +12,7 @@ using CusomMapOSM_Infrastructure.Databases.Repositories.Interfaces.Authenticatio
 using CusomMapOSM_Infrastructure.Databases.Repositories.Interfaces.Type;
 using CusomMapOSM_Infrastructure.Features.Authentication;
 using CusomMapOSM_Infrastructure.Services;
+using CusomMapOSM_Infrastructure.Features.Osm;
 using CusomMapOSM_Shared.Constant;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -59,6 +62,7 @@ public static class DependencyInjections
         services.AddHttpClient<IOverpassService, OverpassService>();
 
         services.AddScoped<IAuthenticationService, AuthenticationService>();
+        services.AddHttpClient<IOsmQueryService, OsmQueryService>();
 
         // Register Redis Cache
         services.AddSingleton<IConnectionMultiplexer>(sp =>

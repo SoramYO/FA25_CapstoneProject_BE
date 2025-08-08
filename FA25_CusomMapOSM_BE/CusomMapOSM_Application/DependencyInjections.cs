@@ -64,6 +64,8 @@ public static class DependencyInjections
             options.QueueLimit = 2;
         }));
 
+        services.AddHttpClient();
+
         // Register Services
 
         return services;

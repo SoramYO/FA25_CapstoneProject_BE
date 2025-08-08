@@ -3,4 +3,5 @@
 internal static class Tags
 {
     internal const string Test = "Test";
+    internal const string Osm = "OSM";
 }
