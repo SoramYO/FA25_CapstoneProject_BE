@@ -3,6 +3,7 @@ using CusomMapOSM_API.Extensions;
 using CusomMapOSM_API.Interfaces;
 using CusomMapOSM_Application.Interfaces.Features.Authentication;
 using CusomMapOSM_Application.Models.DTOs.Features.Authentication.Request;
+using CusomMapOSM_Application.Models.DTOs.Features.Authentication.Response;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CusomMapOSM_API.Endpoints.Authentication;

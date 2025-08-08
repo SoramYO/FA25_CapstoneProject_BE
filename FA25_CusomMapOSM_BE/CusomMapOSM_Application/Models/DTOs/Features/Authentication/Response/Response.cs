@@ -15,3 +15,8 @@ public record RegisterVerifyOtpResDto
     public required string Email { get; set; }
     public required string Otp { get; set; }
 }
+
+public record LogoutResDto
+{
+    public required string Result { get; set; }
+}
