@@ -3,11 +3,14 @@ using CusomMapOSM_Application.Interfaces.Features.Sessions;
 using CusomMapOSM_Application.Interfaces.Services.Auth;
 using CusomMapOSM_Application.Models.DTOs.Features.Sessions.Request;
 using CusomMapOSM_Application.Models.DTOs.Features.Sessions.Response;
+using CusomMapOSM_Application.Models.DTOs.Features.Sessions.Events;
 using CusomMapOSM_Domain.Entities.QuestionBanks;
 using CusomMapOSM_Domain.Entities.Sessions;
 using CusomMapOSM_Domain.Entities.Sessions.Enums;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Interfaces.QuestionBanks;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Interfaces.Sessions;
+using CusomMapOSM_Infrastructure.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Optional;
 
 namespace CusomMapOSM_Infrastructure.Features.Sessions;
@@ -20,6 +23,7 @@ public class SessionService : ISessionService
     private readonly IStudentResponseRepository _responseRepository;
     private readonly IQuestionRepository _questionRepository;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IHubContext<SessionHub> _sessionHubContext;
 
     public SessionService(
         ISessionRepository sessionRepository,
@@ -27,7 +31,8 @@ public class SessionService : ISessionService
         ISessionQuestionRepository sessionQuestionRepository,
         IStudentResponseRepository responseRepository,
         IQuestionRepository questionRepository,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IHubContext<SessionHub> sessionHubContext)
     {
         _sessionRepository = sessionRepository;
         _participantRepository = participantRepository;
@@ -35,6 +40,7 @@ public class SessionService : ISessionService
         _responseRepository = responseRepository;
         _questionRepository = questionRepository;
         _currentUserService = currentUserService;
+        _sessionHubContext = sessionHubContext;
     }
 
     public async Task<Option<CreateSessionResponse, Error>> CreateSession(CreateSessionRequest request)
@@ -229,9 +235,22 @@ public class SessionService : ISessionService
         }
 
         var started = await _sessionRepository.StartSession(sessionId);
-        return started
-            ? Option.Some<bool, Error>(true)
-            : Option.None<bool, Error>(Error.Failure("Session.StartFailed", "Failed to start session"));
+        if (!started)
+        {
+            return Option.None<bool, Error>(Error.Failure("Session.StartFailed", "Failed to start session"));
+        }
+
+        // Broadcast session status change
+        await _sessionHubContext.Clients.Group($"session:{sessionId}")
+            .SendAsync("SessionStatusChanged", new SessionStatusChangedEvent
+            {
+                SessionId = sessionId,
+                Status = SessionStatusEnum.IN_PROGRESS.ToString(),
+                Message = "Session has started",
+                ChangedAt = DateTime.UtcNow
+            });
+
+        return Option.Some<bool, Error>(true);
     }
 
     public async Task<Option<bool, Error>> PauseSession(Guid sessionId)
@@ -251,9 +270,22 @@ public class SessionService : ISessionService
         }
 
         var paused = await _sessionRepository.PauseSession(sessionId);
-        return paused
-            ? Option.Some<bool, Error>(true)
-            : Option.None<bool, Error>(Error.Failure("Session.PauseFailed", "Failed to pause session"));
+        if (!paused)
+        {
+            return Option.None<bool, Error>(Error.Failure("Session.PauseFailed", "Failed to pause session"));
+        }
+
+        // Broadcast session status change
+        await _sessionHubContext.Clients.Group($"session:{sessionId}")
+            .SendAsync("SessionStatusChanged", new SessionStatusChangedEvent
+            {
+                SessionId = sessionId,
+                Status = SessionStatusEnum.PAUSED.ToString(),
+                Message = "Session has been paused",
+                ChangedAt = DateTime.UtcNow
+            });
+
+        return Option.Some<bool, Error>(true);
     }
 
     public async Task<Option<bool, Error>> ResumeSession(Guid sessionId)
@@ -273,9 +305,22 @@ public class SessionService : ISessionService
         }
 
         var resumed = await _sessionRepository.ResumeSession(sessionId);
-        return resumed
-            ? Option.Some<bool, Error>(true)
-            : Option.None<bool, Error>(Error.Failure("Session.ResumeFailed", "Failed to resume session"));
+        if (!resumed)
+        {
+            return Option.None<bool, Error>(Error.Failure("Session.ResumeFailed", "Failed to resume session"));
+        }
+
+        // Broadcast session status change
+        await _sessionHubContext.Clients.Group($"session:{sessionId}")
+            .SendAsync("SessionStatusChanged", new SessionStatusChangedEvent
+            {
+                SessionId = sessionId,
+                Status = SessionStatusEnum.IN_PROGRESS.ToString(),
+                Message = "Session has resumed",
+                ChangedAt = DateTime.UtcNow
+            });
+
+        return Option.Some<bool, Error>(true);
     }
 
     public async Task<Option<bool, Error>> EndSession(Guid sessionId)
@@ -303,6 +348,16 @@ public class SessionService : ISessionService
 
         // Mark all participants as left
         await _participantRepository.MarkAllParticipantsAsLeft(sessionId);
+
+        // Broadcast session status change
+        await _sessionHubContext.Clients.Group($"session:{sessionId}")
+            .SendAsync("SessionStatusChanged", new SessionStatusChangedEvent
+            {
+                SessionId = sessionId,
+                Status = SessionStatusEnum.COMPLETED.ToString(),
+                Message = "Session has ended",
+                ChangedAt = DateTime.UtcNow
+            });
 
         return Option.Some<bool, Error>(true);
     }
@@ -373,6 +428,21 @@ public class SessionService : ISessionService
         // Update session participant count
         await _sessionRepository.UpdateParticipantCount(session.SessionId);
 
+        // Get updated participant count
+        var updatedSession = await _sessionRepository.GetSessionById(session.SessionId);
+        var totalParticipants = updatedSession?.TotalParticipants ?? 1;
+
+        // Broadcast participant joined event
+        await _sessionHubContext.Clients.Group($"session:{session.SessionId}")
+            .SendAsync("ParticipantJoined", new ParticipantJoinedEvent
+            {
+                SessionParticipantId = participant.SessionParticipantId,
+                DisplayName = participant.DisplayName,
+                IsGuest = participant.IsGuest,
+                TotalParticipants = totalParticipants,
+                JoinedAt = participant.JoinedAt
+            });
+
         return Option.Some<JoinSessionResponse, Error>(new JoinSessionResponse
         {
             SessionParticipantId = participant.SessionParticipantId,
@@ -402,6 +472,20 @@ public class SessionService : ISessionService
 
         // Update session participant count
         await _sessionRepository.UpdateParticipantCount(participant.SessionId);
+
+        // Get updated participant count
+        var updatedSession = await _sessionRepository.GetSessionById(participant.SessionId);
+        var totalParticipants = updatedSession?.TotalParticipants ?? 0;
+
+        // Broadcast participant left event
+        await _sessionHubContext.Clients.Group($"session:{participant.SessionId}")
+            .SendAsync("ParticipantLeft", new ParticipantLeftEvent
+            {
+                SessionParticipantId = participant.SessionParticipantId,
+                DisplayName = participant.DisplayName,
+                TotalParticipants = totalParticipants,
+                LeftAt = DateTime.UtcNow
+            });
 
         return Option.Some<bool, Error>(true);
     }
@@ -471,9 +555,40 @@ public class SessionService : ISessionService
 
         // Activate next question
         var activated = await _sessionQuestionRepository.ActivateQuestion(nextQuestion.SessionQuestionId);
-        return activated
-            ? Option.Some<bool, Error>(true)
-            : Option.None<bool, Error>(Error.Failure("Session.ActivateFailed", "Failed to activate question"));
+        if (!activated)
+        {
+            return Option.None<bool, Error>(Error.Failure("Session.ActivateFailed", "Failed to activate question"));
+        }
+
+        // Get full question details for broadcasting
+        var activatedQuestion = await _sessionQuestionRepository.GetSessionQuestionById(nextQuestion.SessionQuestionId);
+        if (activatedQuestion?.Question != null)
+        {
+            var question = activatedQuestion.Question;
+            var totalQuestions = await _sessionQuestionRepository.GetTotalQuestionsInSession(sessionId);
+
+            // Broadcast question activated event
+            await _sessionHubContext.Clients.Group($"session:{sessionId}")
+                .SendAsync("QuestionActivated", new QuestionActivatedEvent
+                {
+                    SessionQuestionId = activatedQuestion.SessionQuestionId,
+                    QuestionId = question.QuestionId,
+                    QuestionText = question.QuestionText,
+                    QuestionType = question.QuestionType.ToString(),
+                    Points = activatedQuestion.PointsOverride ?? question.Points,
+                    TimeLimit = activatedQuestion.TimeLimitOverride ?? question.TimeLimit,
+                    QuestionNumber = activatedQuestion.QueueOrder,
+                    TotalQuestions = totalQuestions,
+                    Options = question.QuestionOptions?.Select(o => new QuestionOptionDto
+                    {
+                        QuestionOptionId = o.QuestionOptionId,
+                        OptionText = o.OptionText
+                    }).ToList(),
+                    ActivatedAt = DateTime.UtcNow
+                });
+        }
+
+        return Option.Some<bool, Error>(true);
     }
 
     public async Task<Option<bool, Error>> SkipCurrentQuestion(Guid sessionId)
@@ -535,9 +650,29 @@ public class SessionService : ISessionService
         }
 
         var extended = await _sessionQuestionRepository.ExtendTimeLimit(sessionQuestionId, additionalSeconds);
-        return extended
-            ? Option.Some<bool, Error>(true)
-            : Option.None<bool, Error>(Error.Failure("Session.ExtendFailed", "Failed to extend time"));
+        if (!extended)
+        {
+            return Option.None<bool, Error>(Error.Failure("Session.ExtendFailed", "Failed to extend time"));
+        }
+
+        // Get updated question details
+        var updatedQuestion = await _sessionQuestionRepository.GetSessionQuestionById(sessionQuestionId);
+        if (updatedQuestion?.Question != null)
+        {
+            var newTimeLimit = updatedQuestion.TimeLimitOverride ?? updatedQuestion.Question.TimeLimit;
+
+            // Broadcast time extended event
+            await _sessionHubContext.Clients.Group($"session:{sessionQuestion.SessionId}")
+                .SendAsync("TimeExtended", new TimeExtendedEvent
+                {
+                    SessionQuestionId = sessionQuestionId,
+                    AdditionalSeconds = additionalSeconds,
+                    NewTimeLimit = newTimeLimit,
+                    ExtendedAt = DateTime.UtcNow
+                });
+        }
+
+        return Option.Some<bool, Error>(true);
     }
 
     public async Task<Option<SubmitResponseResponse, Error>> SubmitResponse(Guid participantId, SubmitResponseRequest request)
@@ -717,6 +852,42 @@ public class SessionService : ISessionService
 
         // Get updated participant for total score
         var updatedParticipant = await _participantRepository.GetParticipantById(participantId);
+
+        // Get total responses for this question
+        var totalResponses = await _responseRepository.CountResponsesForQuestion(request.SessionQuestionId);
+
+        // Broadcast response submitted event
+        await _sessionHubContext.Clients.Group($"session:{participant.SessionId}")
+            .SendAsync("ResponseSubmitted", new ResponseSubmittedEvent
+            {
+                SessionQuestionId = request.SessionQuestionId,
+                ParticipantId = participantId,
+                DisplayName = participant.DisplayName,
+                IsCorrect = isCorrect,
+                PointsEarned = pointsEarned,
+                ResponseTimeSeconds = request.ResponseTimeSeconds,
+                TotalResponses = totalResponses,
+                SubmittedAt = response.SubmittedAt
+            });
+
+        // Get and broadcast updated leaderboard
+        var leaderboard = await _participantRepository.GetLeaderboard(participant.SessionId, 10);
+        await _sessionHubContext.Clients.Group($"session:{participant.SessionId}")
+            .SendAsync("LeaderboardUpdate", new LeaderboardUpdateEvent
+            {
+                SessionId = participant.SessionId,
+                TopParticipants = leaderboard.Select(p => new LeaderboardEntry
+                {
+                    SessionParticipantId = p.SessionParticipantId,
+                    DisplayName = p.DisplayName,
+                    TotalScore = p.TotalScore,
+                    TotalCorrect = p.TotalCorrect,
+                    TotalAnswered = p.TotalAnswered,
+                    AverageResponseTime = p.AverageResponseTime,
+                    Rank = p.Rank
+                }).ToList(),
+                UpdatedAt = DateTime.UtcNow
+            });
 
         return Option.Some<SubmitResponseResponse, Error>(new SubmitResponseResponse
         {
