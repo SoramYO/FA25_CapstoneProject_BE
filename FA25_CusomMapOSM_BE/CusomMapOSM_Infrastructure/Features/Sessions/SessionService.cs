@@ -438,24 +438,318 @@ public class SessionService : ISessionService
         });
     }
 
-    // TODO: Implement remaining methods
-    public Task<Option<bool, Error>> ActivateNextQuestion(Guid sessionId)
+    public async Task<Option<bool, Error>> ActivateNextQuestion(Guid sessionId)
     {
-        throw new NotImplementedException();
+        var currentUserId = _currentUserService.GetUserId();
+        if (currentUserId == null)
+        {
+            return Option.None<bool, Error>(
+                Error.Unauthorized("Session.Unauthorized", "User not authenticated"));
+        }
+
+        var isHost = await _sessionRepository.CheckUserIsHost(sessionId, currentUserId.Value);
+        if (!isHost)
+        {
+            return Option.None<bool, Error>(
+                Error.Forbidden("Session.NotHost", "Only the host can control questions"));
+        }
+
+        // Complete current active question if exists
+        var activeQuestion = await _sessionQuestionRepository.GetActiveQuestion(sessionId);
+        if (activeQuestion != null)
+        {
+            await _sessionQuestionRepository.CompleteQuestion(activeQuestion.SessionQuestionId);
+        }
+
+        // Get next queued question
+        var nextQuestion = await _sessionQuestionRepository.GetNextQueuedQuestion(sessionId);
+        if (nextQuestion == null)
+        {
+            return Option.None<bool, Error>(
+                Error.NotFound("Session.NoMoreQuestions", "No more questions in queue"));
+        }
+
+        // Activate next question
+        var activated = await _sessionQuestionRepository.ActivateQuestion(nextQuestion.SessionQuestionId);
+        return activated
+            ? Option.Some<bool, Error>(true)
+            : Option.None<bool, Error>(Error.Failure("Session.ActivateFailed", "Failed to activate question"));
     }
 
-    public Task<Option<bool, Error>> SkipCurrentQuestion(Guid sessionId)
+    public async Task<Option<bool, Error>> SkipCurrentQuestion(Guid sessionId)
     {
-        throw new NotImplementedException();
+        var currentUserId = _currentUserService.GetUserId();
+        if (currentUserId == null)
+        {
+            return Option.None<bool, Error>(
+                Error.Unauthorized("Session.Unauthorized", "User not authenticated"));
+        }
+
+        var isHost = await _sessionRepository.CheckUserIsHost(sessionId, currentUserId.Value);
+        if (!isHost)
+        {
+            return Option.None<bool, Error>(
+                Error.Forbidden("Session.NotHost", "Only the host can skip questions"));
+        }
+
+        var activeQuestion = await _sessionQuestionRepository.GetActiveQuestion(sessionId);
+        if (activeQuestion == null)
+        {
+            return Option.None<bool, Error>(
+                Error.NotFound("Session.NoActiveQuestion", "No active question to skip"));
+        }
+
+        var skipped = await _sessionQuestionRepository.SkipQuestion(activeQuestion.SessionQuestionId);
+        return skipped
+            ? Option.Some<bool, Error>(true)
+            : Option.None<bool, Error>(Error.Failure("Session.SkipFailed", "Failed to skip question"));
     }
 
-    public Task<Option<bool, Error>> ExtendTime(Guid sessionQuestionId, int additionalSeconds)
+    public async Task<Option<bool, Error>> ExtendTime(Guid sessionQuestionId, int additionalSeconds)
     {
-        throw new NotImplementedException();
+        var sessionQuestion = await _sessionQuestionRepository.GetSessionQuestionById(sessionQuestionId);
+        if (sessionQuestion == null)
+        {
+            return Option.None<bool, Error>(
+                Error.NotFound("SessionQuestion.NotFound", "Session question not found"));
+        }
+
+        var currentUserId = _currentUserService.GetUserId();
+        if (currentUserId == null)
+        {
+            return Option.None<bool, Error>(
+                Error.Unauthorized("Session.Unauthorized", "User not authenticated"));
+        }
+
+        var isHost = await _sessionRepository.CheckUserIsHost(sessionQuestion.SessionId, currentUserId.Value);
+        if (!isHost)
+        {
+            return Option.None<bool, Error>(
+                Error.Forbidden("Session.NotHost", "Only the host can extend time"));
+        }
+
+        if (additionalSeconds <= 0 || additionalSeconds > 120)
+        {
+            return Option.None<bool, Error>(
+                Error.ValidationError("Session.InvalidTimeExtension", "Time extension must be between 1 and 120 seconds"));
+        }
+
+        var extended = await _sessionQuestionRepository.ExtendTimeLimit(sessionQuestionId, additionalSeconds);
+        return extended
+            ? Option.Some<bool, Error>(true)
+            : Option.None<bool, Error>(Error.Failure("Session.ExtendFailed", "Failed to extend time"));
     }
 
-    public Task<Option<SubmitResponseResponse, Error>> SubmitResponse(Guid participantId, SubmitResponseRequest request)
+    public async Task<Option<SubmitResponseResponse, Error>> SubmitResponse(Guid participantId, SubmitResponseRequest request)
     {
-        throw new NotImplementedException();
+        // Get participant
+        var participant = await _participantRepository.GetParticipantById(participantId);
+        if (participant == null)
+        {
+            return Option.None<SubmitResponseResponse, Error>(
+                Error.NotFound("Participant.NotFound", "Participant not found"));
+        }
+
+        // Get session question with question details
+        var sessionQuestion = await _sessionQuestionRepository.GetSessionQuestionById(request.SessionQuestionId);
+        if (sessionQuestion == null)
+        {
+            return Option.None<SubmitResponseResponse, Error>(
+                Error.NotFound("SessionQuestion.NotFound", "Session question not found"));
+        }
+
+        // Validate question belongs to participant's session
+        if (sessionQuestion.SessionId != participant.SessionId)
+        {
+            return Option.None<SubmitResponseResponse, Error>(
+                Error.ValidationError("Session.QuestionMismatch", "Question does not belong to this session"));
+        }
+
+        // Check if question is active
+        if (sessionQuestion.Status != SessionQuestionStatusEnum.ACTIVE)
+        {
+            return Option.None<SubmitResponseResponse, Error>(
+                Error.ValidationError("SessionQuestion.NotActive", "Question is not currently active"));
+        }
+
+        // Check if already answered
+        var alreadyAnswered = await _responseRepository.CheckParticipantAlreadyAnswered(
+            request.SessionQuestionId, participantId);
+        if (alreadyAnswered)
+        {
+            return Option.None<SubmitResponseResponse, Error>(
+                Error.Conflict("Response.AlreadySubmitted", "You have already submitted a response for this question"));
+        }
+
+        var question = sessionQuestion.Question!;
+        bool isCorrect = false;
+        decimal? distanceError = null;
+
+        // Validate and score based on question type
+        switch (question.QuestionType)
+        {
+            case QuestionTypeEnum.MULTIPLE_CHOICE:
+            case QuestionTypeEnum.TRUE_FALSE:
+                if (request.QuestionOptionId == null)
+                {
+                    return Option.None<SubmitResponseResponse, Error>(
+                        Error.ValidationError("Response.MissingOption", "Question option is required"));
+                }
+                var option = question.QuestionOptions?.FirstOrDefault(o => o.QuestionOptionId == request.QuestionOptionId);
+                if (option == null)
+                {
+                    return Option.None<SubmitResponseResponse, Error>(
+                        Error.ValidationError("Response.InvalidOption", "Invalid question option"));
+                }
+                isCorrect = option.IsCorrect;
+                break;
+
+            case QuestionTypeEnum.SHORT_ANSWER:
+                if (string.IsNullOrWhiteSpace(request.ResponseText))
+                {
+                    return Option.None<SubmitResponseResponse, Error>(
+                        Error.ValidationError("Response.MissingText", "Response text is required"));
+                }
+                isCorrect = string.Equals(
+                    request.ResponseText?.Trim(),
+                    question.CorrectAnswerText?.Trim(),
+                    StringComparison.OrdinalIgnoreCase);
+                break;
+
+            case QuestionTypeEnum.WORD_CLOUD:
+                if (string.IsNullOrWhiteSpace(request.ResponseText))
+                {
+                    return Option.None<SubmitResponseResponse, Error>(
+                        Error.ValidationError("Response.MissingText", "Response text is required"));
+                }
+                // Word cloud doesn't have right/wrong answers
+                isCorrect = true;
+                break;
+
+            case QuestionTypeEnum.PIN_ON_MAP:
+                if (request.ResponseLatitude == null || request.ResponseLongitude == null)
+                {
+                    return Option.None<SubmitResponseResponse, Error>(
+                        Error.ValidationError("Response.MissingCoordinates", "Latitude and longitude are required"));
+                }
+                if (question.CorrectLatitude == null || question.CorrectLongitude == null)
+                {
+                    return Option.None<SubmitResponseResponse, Error>(
+                        Error.ValidationError("Question.NoCorrectLocation", "Question does not have a correct location set"));
+                }
+
+                // Calculate distance using Haversine formula
+                distanceError = CalculateDistance(
+                    (double)question.CorrectLatitude.Value,
+                    (double)question.CorrectLongitude.Value,
+                    (double)request.ResponseLatitude.Value,
+                    (double)request.ResponseLongitude.Value);
+
+                var acceptanceRadius = question.AcceptanceRadiusMeters ?? 1000; // Default 1km
+                isCorrect = distanceError <= acceptanceRadius;
+                break;
+        }
+
+        // Calculate points
+        var basePoints = sessionQuestion.PointsOverride ?? question.Points;
+        var pointsEarned = 0;
+
+        if (isCorrect)
+        {
+            pointsEarned = basePoints;
+
+            // Bonus points for speed if enabled
+            var session = await _sessionRepository.GetSessionById(participant.SessionId);
+            if (session?.PointsForSpeed == true && request.ResponseTimeSeconds > 0)
+            {
+                var timeLimit = sessionQuestion.TimeLimitOverride ?? question.TimeLimit;
+                if (timeLimit > 0)
+                {
+                    // Bonus: 0-50% based on speed (faster = more bonus)
+                    var speedRatio = 1 - (request.ResponseTimeSeconds / timeLimit);
+                    if (speedRatio > 0)
+                    {
+                        var bonus = (int)(basePoints * 0.5m * (decimal)speedRatio);
+                        pointsEarned += bonus;
+                    }
+                }
+            }
+        }
+
+        // Create response
+        var response = new StudentResponse
+        {
+            StudentResponseId = Guid.NewGuid(),
+            SessionQuestionId = request.SessionQuestionId,
+            SessionParticipantId = participantId,
+            QuestionOptionId = request.QuestionOptionId,
+            ResponseText = request.ResponseText,
+            ResponseLatitude = request.ResponseLatitude,
+            ResponseLongitude = request.ResponseLongitude,
+            IsCorrect = isCorrect,
+            PointsEarned = pointsEarned,
+            ResponseTimeSeconds = request.ResponseTimeSeconds,
+            UsedHint = request.UsedHint,
+            DistanceErrorMeters = distanceError,
+            SubmittedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        var created = await _responseRepository.CreateResponse(response);
+        if (!created)
+        {
+            return Option.None<SubmitResponseResponse, Error>(
+                Error.Failure("Response.CreateFailed", "Failed to submit response"));
+        }
+
+        // Update session question stats
+        await _sessionQuestionRepository.IncrementResponseCount(request.SessionQuestionId, isCorrect);
+
+        // Update participant stats and score
+        await _participantRepository.UpdateParticipantScore(participantId, pointsEarned);
+        await _participantRepository.UpdateParticipantStats(participantId);
+
+        // Update rankings
+        await _participantRepository.UpdateParticipantRankings(participant.SessionId);
+
+        // Get updated rank
+        var currentRank = await _participantRepository.GetParticipantRank(participantId);
+
+        // Get updated participant for total score
+        var updatedParticipant = await _participantRepository.GetParticipantById(participantId);
+
+        return Option.Some<SubmitResponseResponse, Error>(new SubmitResponseResponse
+        {
+            StudentResponseId = response.StudentResponseId,
+            IsCorrect = isCorrect,
+            PointsEarned = pointsEarned,
+            TotalScore = updatedParticipant?.TotalScore ?? 0,
+            CurrentRank = currentRank,
+            Explanation = question.Explanation,
+            Message = isCorrect ? "Correct answer!" : "Incorrect answer",
+            SubmittedAt = response.SubmittedAt
+        });
+    }
+
+    // Helper method to calculate distance between two points (Haversine formula)
+    private decimal CalculateDistance(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double R = 6371000; // Earth's radius in meters
+        var dLat = ToRadians(lat2 - lat1);
+        var dLon = ToRadians(lon2 - lon1);
+
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                Math.Cos(ToRadians(lat1)) * Math.Cos(ToRadians(lat2)) *
+                Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+
+        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        var distance = R * c;
+
+        return (decimal)distance;
+    }
+
+    private double ToRadians(double degrees)
+    {
+        return degrees * Math.PI / 180;
     }
 }

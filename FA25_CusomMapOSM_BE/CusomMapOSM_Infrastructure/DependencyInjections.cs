@@ -105,6 +105,7 @@ using CusomMapOSM_Infrastructure.Features.Notifications;
 using CusomMapOSM_Application.Interfaces.Features.Sessions;
 using CusomMapOSM_Application.Interfaces.Features.QuestionBanks;
 using CusomMapOSM_Infrastructure.Features.Sessions;
+using CusomMapOSM_Infrastructure.Features.QuestionBanks;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Interfaces.Sessions;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Implementations.Sessions;
 using CusomMapOSM_Infrastructure.Databases.Repositories.Interfaces.QuestionBanks;
@@ -222,7 +223,7 @@ public static class DependencyInjections
 
         // Session Management Services
         services.AddScoped<ISessionService, SessionService>();
-        // TODO: Add IQuestionBankService implementation
+        services.AddScoped<IQuestionBankService, QuestionBankService>();
 
         services.AddScoped<IOrganizationAdminService, OrganizationAdminService>();
         services.AddScoped<IOrganizationAdminRepository, OrganizationAdminRepository>();
