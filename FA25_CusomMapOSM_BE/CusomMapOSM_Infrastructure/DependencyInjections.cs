@@ -102,6 +102,13 @@ using CusomMapOSM_Application.Interfaces.Features.Notifications;
 using CusomMapOSM_Commons.Constant;
 using CusomMapOSM_Infrastructure.Features.Locations;
 using CusomMapOSM_Infrastructure.Features.Notifications;
+using CusomMapOSM_Application.Interfaces.Features.Sessions;
+using CusomMapOSM_Application.Interfaces.Features.QuestionBanks;
+using CusomMapOSM_Infrastructure.Features.Sessions;
+using CusomMapOSM_Infrastructure.Databases.Repositories.Interfaces.Sessions;
+using CusomMapOSM_Infrastructure.Databases.Repositories.Implementations.Sessions;
+using CusomMapOSM_Infrastructure.Databases.Repositories.Interfaces.QuestionBanks;
+using CusomMapOSM_Infrastructure.Databases.Repositories.Implementations.QuestionBanks;
 using Hangfire;
 using Hangfire.Redis;
 
@@ -150,7 +157,15 @@ public static class DependencyInjections
         services.AddScoped<IStoryMapRepository, StoryMapRepository>();
         services.AddScoped<ILayerAnimationRepository, LayerAnimationRepository>();
         services.AddScoped<ISupportTicketRepository, SupportTicketRepository>();
-        
+
+        // Session Management Repositories
+        services.AddScoped<IQuestionBankRepository, QuestionBankRepository>();
+        services.AddScoped<IQuestionRepository, QuestionRepository>();
+        services.AddScoped<ISessionRepository, SessionRepository>();
+        services.AddScoped<ISessionParticipantRepository, SessionParticipantRepository>();
+        services.AddScoped<ISessionQuestionRepository, SessionQuestionRepository>();
+        services.AddScoped<IStudentResponseRepository, StudentResponseRepository>();
+
         services.AddSingleton<IMongoClient>(_ => new MongoClient(MongoDatabaseConstant.ConnectionString));
         services.AddScoped(sp =>
         {
@@ -204,7 +219,10 @@ public static class DependencyInjections
         services.AddSingleton<ISegmentExecutionStateStore, InMemorySegmentExecutionStateStore>();
         services.AddScoped<ILayerAnimationService, LayerAnimationService>();
         services.AddScoped<ISupportTicketService, SupportTicketService>();
-        
+
+        // Session Management Services
+        services.AddScoped<ISessionService, SessionService>();
+        // TODO: Add IQuestionBankService implementation
 
         services.AddScoped<IOrganizationAdminService, OrganizationAdminService>();
         services.AddScoped<IOrganizationAdminRepository, OrganizationAdminRepository>();
