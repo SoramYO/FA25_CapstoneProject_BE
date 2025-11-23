@@ -28,6 +28,7 @@ public interface ISessionQuestionRepository
     // Statistics
     Task<bool> UpdateResponseStats(Guid sessionQuestionId);
     Task<bool> IncrementResponseCount(Guid sessionQuestionId, bool isCorrect);
+    Task<int> GetTotalQuestionsInSession(Guid sessionId);
 
     // Validation
     Task<bool> CheckSessionQuestionExists(Guid sessionQuestionId);

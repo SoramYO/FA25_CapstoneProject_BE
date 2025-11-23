@@ -175,6 +175,13 @@ public class SessionQuestionRepository : ISessionQuestionRepository
         return await _context.SaveChangesAsync() > 0;
     }
 
+    public async Task<int> GetTotalQuestionsInSession(Guid sessionId)
+    {
+        return await _context.SessionQuestions
+            .Where(sq => sq.SessionId == sessionId && sq.IsActive)
+            .CountAsync();
+    }
+
     public async Task<bool> CheckSessionQuestionExists(Guid sessionQuestionId)
     {
         return await _context.SessionQuestions.AnyAsync(sq => sq.SessionQuestionId == sessionQuestionId);

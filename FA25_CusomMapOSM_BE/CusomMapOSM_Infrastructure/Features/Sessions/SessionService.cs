@@ -854,7 +854,7 @@ public class SessionService : ISessionService
         var updatedParticipant = await _participantRepository.GetParticipantById(participantId);
 
         // Get total responses for this question
-        var totalResponses = await _responseRepository.CountResponsesForQuestion(request.SessionQuestionId);
+        var totalResponses = await _responseRepository.GetTotalResponseCount(request.SessionQuestionId);
 
         // Broadcast response submitted event
         await _sessionHubContext.Clients.Group($"session:{participant.SessionId}")
